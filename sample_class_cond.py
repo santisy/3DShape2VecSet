@@ -12,6 +12,7 @@ import trimesh
 import models_class_cond, models_ae
 
 from pathlib import Path
+from tqdm import tqdm
 
 
 if __name__ == "__main__":
@@ -39,7 +40,7 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(args.dm_pth)['model'])
     model.to(device)
 
-    density = 128
+    density = 256
     gap = 2. / density
     x = np.linspace(-1, 1, density+1)
     y = np.linspace(-1, 1, density+1)
@@ -48,11 +49,11 @@ if __name__ == "__main__":
     grid = torch.from_numpy(np.stack([xv, yv, zv]).astype(np.float32)).view(3, -1).transpose(0, 1)[None].to(device, non_blocking=True)
 
     total = 1000
-    iters = 100
+    iters = 10
 
 
     with torch.no_grad():
-        for category_id in [18]:
+        for category_id in range(52, 60):
             print(category_id)
             for i in range(1000//iters):
                 sampled_array = model.sample(cond=torch.Tensor([category_id]*iters).long().to(device), batch_seeds=torch.arange(i*iters, (i+1)*iters).to(device)).float()
@@ -61,9 +62,13 @@ if __name__ == "__main__":
 
                 for j in range(sampled_array.shape[0]):
                     
-                    logits = ae.decode(sampled_array[j:j+1], grid)
+                    #logits = ae.decode(sampled_array[j:j+1], grid)
+                    logits_list = []
+                    for grid_slice in tqdm(torch.chunk(grid, density + 1, dim=1)):
+                        logits_ = ae.decode(sampled_array[j:j+1], grid_slice)
+                        logits_list.append(logits_)
 
-                    logits = logits.detach()
+                    logits = torch.cat(logits_list, dim=1).detach()
                     
                     volume = logits.view(density+1, density+1, density+1).permute(1, 0, 2).cpu().numpy()
                     verts, faces = mcubes.marching_cubes(volume, 0)
@@ -73,3 +78,9 @@ if __name__ == "__main__":
 
                     m = trimesh.Trimesh(verts, faces)
                     m.export('class_cond_obj/{}/{:02d}-{:05d}.obj'.format(args.dm, category_id, i*iters+j))
+
+                    if j > 3:
+                        break
+
+                break
+
